@@ -16,6 +16,17 @@ CREATE TABLE IF NOT EXISTS orders (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'uploaded',
+    error TEXT,
+    segments_json TEXT,
+    products_json TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -65,6 +76,71 @@ class Database:
         )
         self.conn.commit()
         return self.get_order(paypal_order_id)
+
+    def list_orders(self, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # -- jobs (M2 video pipeline) ----------------------------------------
+    def create_job(self, job_id: str, filename: str, stored_path: str) -> dict:
+        now = time.time()
+        self.conn.execute(
+            "INSERT INTO jobs (id, filename, stored_path, status, created_at,"
+            " updated_at) VALUES (?, ?, ?, 'uploaded', ?, ?)",
+            (job_id, filename, stored_path, now, now),
+        )
+        self.conn.commit()
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        job = dict(row)
+        job["segments"] = json.loads(job.pop("segments_json") or "[]")
+        job["products"] = json.loads(job.pop("products_json") or "[]")
+        return job
+
+    def update_job(
+        self,
+        job_id: str,
+        status: str | None = None,
+        error: str | None = None,
+        segments: list | None = None,
+        products: list | None = None,
+    ) -> dict | None:
+        sets = ["updated_at = ?"]
+        params: list = [time.time()]
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if error is not None:
+            sets.append("error = ?")
+            params.append(error)
+        if segments is not None:
+            sets.append("segments_json = ?")
+            params.append(json.dumps(segments))
+        if products is not None:
+            sets.append("products_json = ?")
+            params.append(json.dumps(products))
+        params.append(job_id)
+        self.conn.execute(
+            f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", params
+        )
+        self.conn.commit()
+        return self.get_job(job_id)
+
+    def list_jobs(self, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id FROM jobs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self.get_job(row["id"]) for row in rows]
 
     def get_order(self, paypal_order_id: str) -> dict | None:
         row = self.conn.execute(
