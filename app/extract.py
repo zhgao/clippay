@@ -3,8 +3,13 @@
 Sends the timestamped transcript to Gemini and asks for a strict JSON list
 of purchasable products. The response is parsed defensively: markdown code
 fences are stripped, entries without a usable name or a positive price are
-dropped, and numbers are coerced/clamped. A clear `ExtractionError` is
-raised when no API key is configured — only at call time, never at boot.
+dropped, and numbers are coerced/clamped.
+
+Graceful degradation: with no API key configured the extractor returns an
+empty product list instead of raising, so the video pipeline still
+completes (transcript + shoppable page work end to end; the page simply
+shows no products). Genuine API/parse failures still raise
+`ExtractionError`.
 """
 import json
 import re
@@ -135,10 +140,9 @@ class ProductExtractor:
 
     def extract_products(self, segments: list[dict]) -> list[dict]:
         if not self.api_key:
-            raise ExtractionError(
-                "GEMINI_API_KEY is not configured. Set it to a Google AI "
-                "Studio API key to enable product extraction."
-            )
+            # Graceful degradation: no key -> no products, no failure.
+            # The pipeline still finishes with the transcript stored.
+            return []
         transcript = "\n".join(
             f"[{float(seg.get('start', 0)):.1f}] {seg.get('text', '')}"
             for seg in segments

@@ -1,7 +1,12 @@
 """Transcriber tests: factory laziness + the faster-whisper glue, exercised
 through a fake `faster_whisper` module so no model is ever downloaded."""
+import math
+import struct
 import sys
 import types
+import wave
+
+import pytest
 
 from app.transcribe import FasterWhisperTranscriber, TranscriptionError, get_transcriber
 
@@ -54,3 +59,27 @@ def test_missing_package_raises_clear_error(monkeypatch):
         assert "faster-whisper is not installed" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected TranscriptionError")
+
+
+def test_decode_audio_works_with_installed_pyav(tmp_path):
+    """Regression guard for the faster-whisper/PyAV incompatibility found
+    by the M2 benchmark: faster-whisper 1.2.1 calls
+    ``av.open(..., metadata_errors="ignore")``, an argument PyAV >= 15
+    removed — every real transcription crashed with TypeError while the
+    faked tests above stayed green. decode_audio exercises that exact
+    av.open() call with no model download. Skipped where faster-whisper
+    is not installed."""
+    fw = pytest.importorskip("faster_whisper")
+    path = tmp_path / "tone.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(
+            b"".join(
+                struct.pack("<h", int(8000 * math.sin(i / 10)))
+                for i in range(8000)  # 0.5 s of tone
+            )
+        )
+    audio = fw.audio.decode_audio(str(path))
+    assert len(audio) == 8000

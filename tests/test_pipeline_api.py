@@ -116,6 +116,29 @@ def test_extraction_failure_marks_job_failed(tmp_path):
     assert len(job["segments"]) == 3
 
 
+def test_pipeline_degrades_gracefully_without_gemini_key(tmp_path):
+    """Real extractor with no API key: the job still finishes 'ready'
+    with the transcript stored and an empty product list (no failure)."""
+    from app.extract import ProductExtractor
+
+    db = Database(":memory:")
+    app = create_app(
+        db=db,
+        paypal=FakePayPal(),
+        transcriber=FakeTranscriber(),
+        extractor=ProductExtractor(api_key=""),
+        upload_dir=str(tmp_path),
+    )
+    client = TestClient(app)
+    job = _upload(client).json()
+    assert job["status"] == "ready"
+    assert len(job["segments"]) == 3
+    assert job["products"] == []
+    page = client.get(f"/p/{job['id']}")
+    assert page.status_code == 200
+    assert "No purchasable products were found" in page.text
+
+
 def test_product_page_lists_products_with_checkout(env):
     job = _upload(env["client"]).json()
     page = env["client"].get(f"/p/{job['id']}")

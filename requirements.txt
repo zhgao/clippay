@@ -3,4 +3,8 @@ uvicorn[standard]==0.38.0
 httpx==0.28.1
 python-multipart==0.0.20
 faster-whisper==1.2.1
+# faster-whisper 1.2.1 passes metadata_errors= to av.open(); PyAV >= 15
+# removed that argument, which crashes every real transcription with
+# TypeError (found by scripts/benchmark_transcribe.py). Keep PyAV < 15.
+av==14.2.0
 pytest==9.1.1

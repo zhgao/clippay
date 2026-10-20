@@ -61,10 +61,11 @@ def test_extract_products_happy_path():
     ]
 
 
-def test_extract_products_missing_key_errors_clearly():
+def test_extract_products_missing_key_degrades_to_empty():
+    # No key -> graceful degradation: empty list, no exception, so the
+    # pipeline can still finish with just the transcript.
     extractor = ProductExtractor(api_key="")
-    with pytest.raises(ExtractionError, match="GEMINI_API_KEY is not configured"):
-        extractor.extract_products(SEGMENTS)
+    assert extractor.extract_products(SEGMENTS) == []
 
 
 def test_extract_products_http_error():
