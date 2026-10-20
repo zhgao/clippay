@@ -1,0 +1,97 @@
+"""Tiny SQLite store for local order records."""
+import json
+import os
+import sqlite3
+import time
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS orders (
+    paypal_order_id TEXT PRIMARY KEY,
+    amount TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'CREATED',
+    payer_email TEXT,
+    raw_json TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+"""
+
+
+class Database:
+    def __init__(self, path: str):
+        if path != ":memory:":
+            parent = os.path.dirname(os.path.abspath(path))
+            os.makedirs(parent, exist_ok=True)
+        self.path = path
+        # check_same_thread=False: FastAPI serves requests in a threadpool.
+        self.conn = sqlite3.connect(path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(SCHEMA)
+        self.conn.commit()
+
+    def upsert_order(
+        self,
+        paypal_order_id: str,
+        amount: str,
+        currency: str = "USD",
+        description: str | None = None,
+        status: str = "CREATED",
+        raw: dict | None = None,
+    ) -> dict:
+        now = time.time()
+        self.conn.execute(
+            """
+            INSERT INTO orders
+                (paypal_order_id, amount, currency, description, status,
+                 raw_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(paypal_order_id) DO UPDATE SET
+                status=excluded.status,
+                raw_json=excluded.raw_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                paypal_order_id,
+                amount,
+                currency,
+                description,
+                status,
+                json.dumps(raw or {}),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        return self.get_order(paypal_order_id)
+
+    def get_order(self, paypal_order_id: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM orders WHERE paypal_order_id = ?",
+            (paypal_order_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_status(
+        self,
+        paypal_order_id: str,
+        status: str,
+        payer_email: str | None = None,
+        raw: dict | None = None,
+    ) -> dict | None:
+        now = time.time()
+        if payer_email is not None:
+            self.conn.execute(
+                "UPDATE orders SET status=?, payer_email=?, raw_json=?, updated_at=? "
+                "WHERE paypal_order_id=?",
+                (status, payer_email, json.dumps(raw or {}), now, paypal_order_id),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE orders SET status=?, raw_json=?, updated_at=? "
+                "WHERE paypal_order_id=?",
+                (status, json.dumps(raw or {}), now, paypal_order_id),
+            )
+        self.conn.commit()
+        return self.get_order(paypal_order_id)
