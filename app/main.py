@@ -1,18 +1,29 @@
-"""ClipPay M1: payment rails.
+"""ClipPay: payment rails (M1) + video -> shoppable page pipeline (M2).
 
 Endpoints:
+  GET  /                              landing page with the upload form
   GET  /healthz
-  POST /api/orders                  create a PayPal order (CAPTURE intent)
-  GET  /api/orders/{order_id}       local order record
-  POST /api/orders/{order_id}/capture  capture an approved order
-  POST /api/webhooks/paypal         PayPal webhook receiver (signature-verified)
+  POST /api/orders                    create a PayPal order (CAPTURE intent)
+  GET  /api/orders/{order_id}         local order record
+  POST /api/orders/{order_id}/capture capture an approved order
+  POST /api/webhooks/paypal           PayPal webhook receiver (verified)
+  POST /api/videos                    upload an mp4 -> transcribe -> extract
+  GET  /api/jobs/{job_id}             pipeline job record
+  GET  /p/{job_id}                    shoppable page for a processed video
+  GET  /dashboard                     seller dashboard (jobs + orders)
 """
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+import os
+import uuid
+
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config
+from . import config, pages
 from .db import Database
+from .extract import ExtractionError, ProductExtractor
 from .paypal import PayPalClient, PayPalError
+from .transcribe import FasterWhisperTranscriber, Transcriber, TranscriptionError
 
 
 class CreateOrderRequest(BaseModel):
@@ -34,6 +45,9 @@ class OrderResponse(BaseModel):
 def create_app(
     db: Database | None = None,
     paypal: PayPalClient | None = None,
+    transcriber: Transcriber | None = None,
+    extractor: ProductExtractor | None = None,
+    upload_dir: str | None = None,
 ) -> FastAPI:
     db = db or Database(config.DATABASE_PATH)
     paypal = paypal or PayPalClient(
@@ -43,8 +57,19 @@ def create_app(
         base_url=config.PAYPAL_BASE_URL,
         verify=config.PAYPAL_CA_BUNDLE or True,
     )
+    transcriber = transcriber or FasterWhisperTranscriber(
+        model_size=config.WHISPER_MODEL
+    )
+    extractor = extractor or ProductExtractor(
+        api_key=config.GEMINI_API_KEY,
+        model=config.GEMINI_MODEL,
+        verify=config.PAYPAL_CA_BUNDLE or True,
+    )
+    upload_dir = upload_dir or config.UPLOAD_DIR
+    os.makedirs(upload_dir, exist_ok=True)
+    brand = config.APP_BRAND_NAME
 
-    app = FastAPI(title="ClipPay", version="0.1.0")
+    app = FastAPI(title="ClipPay", version="0.2.0")
 
     def get_db() -> Database:
         return db
@@ -52,10 +77,16 @@ def create_app(
     def get_paypal() -> PayPalClient:
         return paypal
 
+    # -- basics -----------------------------------------------------------
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "service": "clippay"}
 
+    @app.get("/", response_class=HTMLResponse)
+    def landing():
+        return pages.landing_page(brand)
+
+    # -- M1: payment rails --------------------------------------------------
     @app.post("/api/orders", response_model=OrderResponse)
     def create_order(
         body: CreateOrderRequest,
@@ -162,6 +193,61 @@ def create_app(
                                  payer_email=payer_email, raw=event)
         # Unknown event types are acknowledged but ignored.
         return {"received": True, "event_type": event_type}
+
+    # -- M2: video pipeline -------------------------------------------------
+    def _process_job(job_id: str) -> dict:
+        """Run transcription + extraction for an uploaded job.
+
+        Synchronous by design (demo scale): the job record always ends in
+        'ready' or 'failed' with a readable error, never stuck in between.
+        """
+        job = db.get_job(job_id)
+        try:
+            db.update_job(job_id, status="transcribing")
+            segments = transcriber.transcribe(job["stored_path"])
+            db.update_job(job_id, status="extracting", segments=segments)
+            products = extractor.extract_products(segments)
+            return db.update_job(job_id, status="ready", products=products)
+        except (TranscriptionError, ExtractionError) as exc:
+            return db.update_job(job_id, status="failed", error=str(exc))
+        except Exception as exc:  # defensive: never leave a job hanging
+            return db.update_job(
+                job_id, status="failed",
+                error=f"unexpected pipeline error: {exc}",
+            )
+
+    @app.post("/api/videos", status_code=201)
+    async def upload_video(file: UploadFile = File(...)):
+        filename = file.filename or ""
+        if not filename.lower().endswith(".mp4"):
+            raise HTTPException(
+                status_code=400, detail="only .mp4 uploads are supported"
+            )
+        job_id = uuid.uuid4().hex[:12]
+        stored_path = os.path.join(upload_dir, f"{job_id}.mp4")
+        with open(stored_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                out.write(chunk)
+        db.create_job(job_id, filename, stored_path)
+        return _process_job(job_id)
+
+    @app.get("/api/jobs/{job_id}")
+    def get_job(job_id: str):
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return job
+
+    @app.get("/p/{job_id}", response_class=HTMLResponse)
+    def product_page(job_id: str):
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="video not found")
+        return pages.product_page(job, brand)
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard():
+        return pages.dashboard_page(db.list_jobs(), db.list_orders(), brand)
 
     return app
 
