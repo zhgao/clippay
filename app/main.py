@@ -11,15 +11,18 @@ Endpoints:
   GET  /api/jobs/{job_id}             pipeline job record
   GET  /p/{job_id}                    shoppable page for a processed video
   GET  /dashboard                     seller dashboard (jobs + orders)
+  GET  /watch/demo                    demo in-video shopping player (new)
+  GET  /watch/demo/video              demo video file (new)
+  POST /api/watch/demo/checkout       labelled mock checkout (new)
 """
 import os
 import uuid
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, pages
+from . import config, pages, watch
 from .db import Database
 from .extract import ExtractionError, ProductExtractor
 from .paypal import PayPalClient, PayPalError
@@ -42,12 +45,28 @@ class OrderResponse(BaseModel):
     currency: str
 
 
+class DemoCheckoutRequest(BaseModel):
+    amount: str = Field(..., description="Decimal amount, e.g. '20.00'")
+    description: str | None = None
+
+
+class DemoCheckoutResponse(BaseModel):
+    order_id: str
+    mode: str = "mock"
+    status: str = "DEMO_COMPLETED"
+    amount: str
+    currency: str = "USD"
+    description: str | None = None
+    note: str = "Mock checkout only — no real PayPal payment was made."
+
+
 def create_app(
     db: Database | None = None,
     paypal: PayPalClient | None = None,
     transcriber: Transcriber | None = None,
     extractor: ProductExtractor | None = None,
     upload_dir: str | None = None,
+    demo_video_path: str | None = None,
 ) -> FastAPI:
     db = db or Database(config.DATABASE_PATH)
     paypal = paypal or PayPalClient(
@@ -67,6 +86,7 @@ def create_app(
     )
     upload_dir = upload_dir or config.UPLOAD_DIR
     os.makedirs(upload_dir, exist_ok=True)
+    demo_video = demo_video_path or watch.DEFAULT_DEMO_VIDEO_PATH
     brand = config.APP_BRAND_NAME
 
     app = FastAPI(title="ClipPay", version="0.2.0")
@@ -248,6 +268,36 @@ def create_app(
     @app.get("/dashboard", response_class=HTMLResponse)
     def dashboard():
         return pages.dashboard_page(db.list_jobs(), db.list_orders(), brand)
+
+    # -- Demo in-video player (additive; touches no M1/M2 code) ----------
+    @app.get("/watch/demo", response_class=HTMLResponse)
+    def watch_demo():
+        # Badge only: the buy flow always tries the real M1 /api/orders
+        # first and falls back to the labelled mock checkout below.
+        configured = bool(config.PAYPAL_CLIENT_ID and config.PAYPAL_CLIENT_SECRET)
+        return watch.watch_page(
+            brand, checkout_mode="sandbox" if configured else "demo"
+        )
+
+    @app.get("/watch/demo/video")
+    def watch_demo_video():
+        if not os.path.isfile(demo_video):
+            raise HTTPException(
+                status_code=404,
+                detail="demo video not generated yet — run "
+                "scripts/generate_demo_watch_video.sh",
+            )
+        return FileResponse(demo_video, media_type="video/mp4")
+
+    @app.post("/api/watch/demo/checkout", response_model=DemoCheckoutResponse)
+    def demo_checkout(body: DemoCheckoutRequest):
+        # Deliberately NOT written to the orders table: a mock order must
+        # never pollute the seller dashboard's real order list.
+        return DemoCheckoutResponse(
+            order_id="DEMO-" + uuid.uuid4().hex[:12].upper(),
+            amount=body.amount,
+            description=body.description,
+        )
 
     return app
 
