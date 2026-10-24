@@ -16,6 +16,7 @@ import re
 
 import httpx
 
+from .config import GEMINI_TIMEOUT
 from .paypal import _sanitized_proxy_url
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
@@ -120,7 +121,7 @@ class ProductExtractor:
     def __init__(
         self,
         api_key: str = "",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.5-flash-lite",
         http: httpx.Client | None = None,
         verify: str | bool = True,
     ):
@@ -132,7 +133,7 @@ class ProductExtractor:
             # Same egress handling as the PayPal client: sanitize the proxy
             # env var ourselves (httpx can choke on special characters).
             self.http = httpx.Client(
-                timeout=60.0,
+                timeout=GEMINI_TIMEOUT,
                 trust_env=False,
                 proxy=_sanitized_proxy_url(),
                 verify=verify,
@@ -148,23 +149,28 @@ class ProductExtractor:
             for seg in segments
         )
         prompt = PROMPT_TEMPLATE.format(transcript=transcript)
-        response = self.http.post(
-            f"{GEMINI_BASE_URL}/v1beta/models/{self.model}:generateContent",
-            headers={
-                "x-goog-api-key": self.api_key,
-                "Content-Type": "application/json",
-            },
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "temperature": 0.2,
+        try:
+            response = self.http.post(
+                f"{GEMINI_BASE_URL}/v1beta/models/{self.model}:generateContent",
+                headers={
+                    "x-goog-api-key": self.api_key,
+                    "Content-Type": "application/json",
                 },
-            },
-        )
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "temperature": 0.2,
+                    },
+                },
+            )
+        except httpx.HTTPError as exc:
+            # Network/timeout failures become ExtractionError like 4xx and
+            # parse failures, so callers only need one error type.
+            raise ExtractionError(f"Gemini request failed: {exc}") from exc
         if response.status_code >= 400:
             raise ExtractionError(
-                f"Gemini API error {response.status_code}: {response.text[:300]}"
+                f"Gemini API error {response.status_code}: {response.text[:1000]}"
             )
         try:
             payload = response.json()
@@ -172,6 +178,6 @@ class ProductExtractor:
             raw_text = "".join(part.get("text", "") for part in parts)
         except (KeyError, IndexError, TypeError) as exc:
             raise ExtractionError(
-                f"Unexpected Gemini response shape: {str(payload)[:300]}"
+                f"Unexpected Gemini response shape: {str(payload)[:1000]}"
             ) from exc
         return parse_products(raw_text)

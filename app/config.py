@@ -29,4 +29,14 @@ WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
 # key, extraction degrades gracefully to an empty product list (the video
 # pipeline still completes with just the transcript).
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Default model: gemini-2.5-flash was retired for new users in Oct 2026
+# (API returns 404). gemini-3.5-flash-lite verified working on a sibling
+# Gemini path (4.4s, $0.00); override with GEMINI_MODEL when deploying.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Extraction call timeout (seconds). A real extraction was observed to take
+# ~111s, so the old 60s default cut genuine calls short. Override with
+# GEMINI_TIMEOUT when deploying.
+try:
+    GEMINI_TIMEOUT = float(os.environ.get("GEMINI_TIMEOUT", "180"))
+except ValueError:
+    GEMINI_TIMEOUT = 180.0

@@ -86,7 +86,8 @@ paid transcription API needed.
 | `DATABASE_PATH`        | no       | `./data/clippay.db`                  | SQLite database file                         |
 | `APP_BRAND_NAME`       | no       | `ClipPay`                            | Brand name shown in pages and PayPal checkout |
 | `GEMINI_API_KEY`       | yes†     | _(empty)_                            | Google AI Studio API key for extraction      |
-| `GEMINI_MODEL`         | no       | `gemini-2.5-flash`                   | Gemini model for product extraction          |
+| `GEMINI_MODEL`         | no       | `gemini-3.5-flash-lite`              | Gemini model for product extraction          |
+| `GEMINI_TIMEOUT`       | no       | `180`                                | Extraction HTTP timeout in seconds           |
 | `UPLOAD_DIR`           | no       | `./data/uploads`                     | Where uploaded videos are stored             |
 | `WHISPER_MODEL`        | no       | `tiny`                               | faster-whisper model size                    |
 
