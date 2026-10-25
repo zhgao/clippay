@@ -7,6 +7,13 @@ import html
 import json
 import time
 
+from .checkout_errors import (
+    BLOCKED_KEYWORDS,
+    BLOCKED_MESSAGE,
+    CANCEL_KEYWORDS,
+    CANCEL_MESSAGE,
+)
+
 _CSS = """
 body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 760px;
        padding: 0 1rem; color: #1a1a2e; }
@@ -20,19 +27,28 @@ button { background: #0070ba; color: #fff; border: 0; border-radius: 6px;
 button:disabled { opacity: .5; }
 .confirm { border: 2px solid #2e7d32; border-radius: 10px; padding: 1rem 1.25rem;
            background: #f1f8f1; }
-/* Same overlay rail as the embed player: cards float over the bottom
-   of the video (above the control bar) so shoppers buy while watching.
-   The rail ignores clicks except on the cards themselves, and cards
-   are always visible — never gated per second. */
+/* Same compact overlay rail as the embed player: cards float over
+   the bottom of the video (above the control bar) so shoppers buy
+   while watching. The rail ignores clicks except on the cards
+   themselves, its height is capped so the video body stays visible,
+   and cards are always visible — never gated per second. Overlay
+   cards carry name + price + one PayPal button only; the full
+   product info (description, timestamp) lives in the cards below the
+   video on this page. The rail scrolls horizontally with snap points
+   and end padding, so the last card always slides fully into view. */
 .player-wrap { position: relative; }
 .player-wrap video { display: block; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 44px;
-         display: flex; gap: .75rem; overflow-x: auto; padding: .5rem;
-         pointer-events: none; }
-.overlay-card { pointer-events: auto; flex: 0 0 220px; background: rgba(255,255,255,.95);
-         border-radius: 10px; padding: .75rem 1rem; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
-.overlay-card h3 { margin: .25rem 0; font-size: 1rem; }
-.overlay-card .price { font-size: 1.1rem; }
+         display: flex; gap: .5rem; overflow-x: auto; overflow-y: hidden;
+         padding: .5rem .75rem .5rem .5rem; max-height: 132px;
+         box-sizing: border-box; scroll-snap-type: x mandatory;
+         scroll-padding-right: .75rem; pointer-events: none; }
+.overlay-card { pointer-events: auto; flex: 0 0 180px; scroll-snap-align: start;
+         background: rgba(255,255,255,.95);
+         border-radius: 10px; padding: .6rem .75rem; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+.overlay-card h3 { margin: .25rem 0; font-size: .95rem; white-space: nowrap;
+         overflow: hidden; text-overflow: ellipsis; }
+.overlay-card .price { font-size: 1.05rem; margin: .25rem 0; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border-bottom: 1px solid #e5e5e5; padding: .45rem .5rem;
          text-align: left; font-size: .92rem; }
@@ -167,6 +183,17 @@ def _product_card_html(product: dict, sdk: bool, overlay: bool) -> str:
             f'data-amount="{html.escape(str(product.get("price", "")), quote=True)}" '
             f'data-description="{html.escape(product.get("name", ""), quote=True)}"></div>'
         )
+    if overlay:
+        # Compact overlay card: name + price + buy only (same rule as
+        # the embed player — description and timestamp would cover
+        # the video). Full info lives in the below-video cards.
+        return (
+            f'<div class="{cls}"><h3>{name}</h3>'
+            f'<p class="price">${price}</p>'
+            f"{pp}<button class=\"fallback-buy\" "
+            f"onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
+            f"</div>"
+        )
     return (
         f'<div class="{cls}"><h3>{name}</h3>'
         f"<p>{desc}</p>"
@@ -182,11 +209,28 @@ def _sdk_script() -> str:
     """PayPal JS SDK popup checkout; same contract as the embed
     player. The client id is PayPal's public identifier; the Secret
     never enters the page. If the SDK never loads, the fallback Buy
-    buttons stay visible and keep the old redirect flow."""
-    return """
-<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD" async></script>
+    buttons stay visible and keep the old redirect flow.
+
+    One PayPal button per card only (disable-funding on the SDK URL
+    plus a pinned PayPal funding source), and the same cancel/blocked/
+    failure classification as the embed player — a closed popup is a
+    neutral cancel note, never a red failure."""
+    script = """
+<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD&disable-funding=paylater,card" async></script>
 <script>
 (function () {
+  function classifyCheckoutError(raw) {
+    var m = ((raw || '') + '').toLowerCase();
+    var cancelKeys = %%CANCEL_KEYS%%;
+    for (var i = 0; i < cancelKeys.length; i++) {
+      if (m.indexOf(cancelKeys[i]) !== -1) return 'cancel';
+    }
+    var blockedKeys = %%BLOCKED_KEYS%%;
+    for (var j = 0; j < blockedKeys.length; j++) {
+      if (m.indexOf(blockedKeys[j]) !== -1) return 'blocked';
+    }
+    return 'failure';
+  }
   var tries = 0;
   function init() {
     if (window.paypal && window.paypal.Buttons) {
@@ -196,6 +240,7 @@ def _sdk_script() -> str:
         var fallback = el.parentElement.querySelector('.fallback-buy');
         if (fallback) fallback.style.display = 'none';
         paypal.Buttons({
+          fundingSource: paypal.FUNDING.PAYPAL,
           createOrder: function () {
             return fetch('/api/orders', {
               method: 'POST',
@@ -223,10 +268,19 @@ def _sdk_script() -> str:
               });
           },
           onCancel: function () {
-            document.getElementById('msg').textContent = 'Payment cancelled — the video is still here.';
+            document.getElementById('msg').textContent = %%CANCEL_MSG%%;
           },
           onError: function (err) {
-            document.getElementById('msg').innerHTML = '<span class="err">Checkout failed: ' + err.message + '</span>';
+            var msg = document.getElementById('msg');
+            var kind = classifyCheckoutError(err && err.message);
+            if (kind === 'cancel') {
+              msg.textContent = %%CANCEL_MSG%%;
+            } else if (kind === 'blocked') {
+              msg.textContent = %%BLOCKED_MSG%%;
+            } else {
+              msg.innerHTML = '<span class="err">Checkout failed: '
+                + (err && err.message ? err.message : 'unknown error') + '</span>';
+            }
           }
         }).render(el);
       });
@@ -239,6 +293,12 @@ def _sdk_script() -> str:
 })();
 </script>
 """
+    return (
+        script.replace("%%CANCEL_KEYS%%", json.dumps(list(CANCEL_KEYWORDS), ensure_ascii=False))
+        .replace("%%BLOCKED_KEYS%%", json.dumps(list(BLOCKED_KEYWORDS), ensure_ascii=False))
+        .replace("%%CANCEL_MSG%%", json.dumps(CANCEL_MESSAGE, ensure_ascii=False))
+        .replace("%%BLOCKED_MSG%%", json.dumps(BLOCKED_MESSAGE, ensure_ascii=False))
+    )
 
 
 def product_page(job: dict, brand: str, has_video: bool = False,
@@ -270,7 +330,10 @@ def product_page(job: dict, brand: str, has_video: bool = False,
             parts.append(video_tag)
     if not products:
         parts.append("<p>No purchasable products were found in this video.</p>")
-    elif not has_video:
+    else:
+        # Full product info below the video when there is one: the
+        # overlay cards above are compact by design (name + price +
+        # buy only), so the description and timestamp live here.
         parts.extend(_product_card_html(p, sdk, overlay=False) for p in products)
     if sdk:
         parts.append('<div id="confirm" style="display:none"></div><p id="msg"></p>')
