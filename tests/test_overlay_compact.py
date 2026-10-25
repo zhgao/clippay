@@ -157,7 +157,7 @@ def test_embed_overlay_no_paylater_or_card_buttons():
 
 def test_rail_height_capped_and_scrolls_with_snap():
     html = _embed_html()
-    assert "max-height: 132px" in html
+    assert "max-height: 168px" in html
     assert "overflow-x: auto" in html
     assert "scroll-snap-type: x mandatory" in html
     assert "scroll-snap-align: start" in html

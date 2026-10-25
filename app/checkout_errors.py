@@ -33,8 +33,8 @@ BLOCKED_KEYWORDS = (
     "popup failed to open",
     "popupblocker",
 )
-CANCEL_MESSAGE = "已取消，可重新点购买"
-BLOCKED_MESSAGE = "请允许本站弹出窗口后重试"
+CANCEL_MESSAGE = "Cancelled — tap buy to try again"
+BLOCKED_MESSAGE = "Please allow popups for this site and try again"
 
 
 def classify_checkout_error(message) -> str:

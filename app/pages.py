@@ -54,7 +54,7 @@ button:disabled { opacity: .5; }
 .player-wrap video { display: block; width: 100%; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 64px;
          display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
-         padding: .75rem 1rem; max-height: 132px;
+         padding: .75rem 1rem; max-height: 168px;
          box-sizing: border-box; scroll-snap-type: x mandatory;
          scroll-padding-right: 1rem; pointer-events: none;
          justify-content: safe center; }
@@ -64,12 +64,15 @@ button:disabled { opacity: .5; }
          -webkit-backdrop-filter: blur(16px) saturate(1.3);
          backdrop-filter: blur(16px) saturate(1.3);
          border: 1px solid rgba(255,255,255,.16);
-         border-radius: 16px; padding: .8rem .9rem;
+         border-radius: 16px; padding: .8rem .9rem 1rem; overflow: hidden;
          box-shadow: 0 8px 28px rgba(0,0,0,.35); color: #fff; }
-.overlay-card h3 { margin: .25rem 0; font-size: .95rem; white-space: nowrap;
+.overlay-card h3 { margin: .25rem 0 .3rem; font-size: 1.05rem; font-weight: 700;
+         line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
+         -webkit-box-orient: vertical; white-space: normal;
          overflow: hidden; text-overflow: ellipsis; color: #fff; }
-.overlay-card .price { font-size: 1.15rem; margin: .35rem 0 .5rem; color: #fff; }
+.overlay-card .price { font-size: 1.15rem; margin: .2rem 0 .6rem; color: #fff; }
 .overlay-card .card-buy { margin-top: auto; }
+.overlay-card .pp-buttons iframe { display: block; }
 /* Neutral fallback buy button (SDK-failure path only): light grey
    pill, dark text — readable on both the dark glass overlay cards
    and the white below-video cards, never the loud blue rectangle.
@@ -292,7 +295,7 @@ def _sdk_script() -> str:
         try {
           var rendered = paypal.Buttons({
             fundingSource: paypal.FUNDING.PAYPAL,
-            style: { shape: 'pill', height: 40, color: 'silver' },
+            style: { shape: 'pill', height: 40, color: 'silver', tagline: false },
           createOrder: function () {
             return fetch('/api/orders', {
               method: 'POST',
