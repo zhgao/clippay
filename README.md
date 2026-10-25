@@ -25,6 +25,13 @@ The pipeline runs synchronously at upload time (demo scale): every job ends
 in status `ready` or `failed` with a readable error — e.g. when
 `GEMINI_API_KEY` is not configured or faster-whisper is not installed.
 
+No file handy? Two more entries feed the same pipeline: paste a video
+link (`POST /api/videos/from-url` — YouTube captions first, yt-dlp
+download fallback; TikTok/Instagram are best-effort, those platforms may
+block automated downloads) or hit "Try the demo instantly"
+(`POST /api/videos/sample`) for the built-in pitch sample, then watch
+and buy in the one-click player (`GET /watch/demo`).
+
 ### Payments (M1)
 
 - `POST /api/orders` creates a PayPal order (CAPTURE intent) and returns the

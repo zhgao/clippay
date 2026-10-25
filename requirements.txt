@@ -8,3 +8,8 @@ faster-whisper==1.2.1
 # TypeError (found by scripts/benchmark_transcribe.py). Keep PyAV < 15.
 av==14.2.0
 pytest==9.1.1
+# URL import: YouTube captions first, yt-dlp download fallback.
+# Both are optional at runtime — the endpoints return clear errors when
+# a helper is missing — but they belong in the deployed environment.
+youtube-transcript-api
+yt-dlp
