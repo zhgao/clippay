@@ -373,12 +373,33 @@ def test_sample_endpoint_runs_pipeline_and_page_shows_flow(client_factory):
     assert "did not clearly state" in page.text  # tote honesty note
 
 
-def test_sample_page_404_and_missing_file_404(client_factory, tmp_path):
+def test_sample_page_404(client_factory):
     client, _ = client_factory()
     assert client.get("/sample/nope").status_code == 404
-    client_missing, _ = client_factory(sample_media="/nonexistent/pitch.mp4")
-    resp = client_missing.post("/api/videos/sample")
-    assert resp.status_code == 404
+
+
+def test_sample_endpoint_falls_back_without_media(client_factory):
+    # Deployed servers have no bundled audio (binaries cannot go
+    # through the text-only deploy path): the endpoint must still
+    # return a ready job with the pre-computed transcript + products.
+    client, _ = client_factory(sample_media="/nonexistent/pitch.mp4")
+    resp = client.post("/api/videos/sample")
+    assert resp.status_code == 201
+    job = resp.json()
+    assert job["status"] == "ready"
+    assert [p["name"] for p in job["products"]] == [
+        "Handmade Ceramic Mug",
+        "Walnut Cutting Board",
+        "Organic Cotton Tote Bag",
+    ]
+    assert [p["price"] for p in job["products"]] == ["20.00", "45.00", "12.00"]
+    assert len(job["segments"]) == 1
+    assert job["segments"][0]["text"].startswith("Welcome to my work shop")
+    page = client.get(f"/sample/{job['id']}")
+    assert page.status_code == 200
+    assert "Handmade Ceramic Mug" in page.text
+    assert "did not clearly state" in page.text  # tote honesty note
+    assert "pre-computed" in page.text  # fallback honesty note
 
 
 def test_landing_and_watch_pages_expose_new_entry_points(client_factory):

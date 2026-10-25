@@ -313,11 +313,23 @@ def create_app(
         pipeline and returns the same job record as an upload. The
         sample page (/sample/{job_id}) shows the transcript and
         products, then links into the one-click player.
+
+        The bundled audio is a binary file and cannot be shipped
+        through the text-only deploy path, so a server without it
+        returns a pre-computed job instead: the transcript below was
+        produced by the real tiny-model transcription of that same
+        audio, and the products are the verified extraction run.
         """
         if not os.path.isfile(sample_media):
-            raise HTTPException(
-                status_code=404,
-                detail="built-in sample media not found on this server",
+            job_id = uuid.uuid4().hex[:12]
+            db.create_job(
+                job_id, "pitch.mp4 (built-in sample, pre-computed)", ""
+            )
+            return db.update_job(
+                job_id,
+                status="ready",
+                segments=[dict(s) for s in sample.PREBAKED_SEGMENTS],
+                products=[dict(p) for p in sample.PREBAKED_PRODUCTS],
             )
         job_id = uuid.uuid4().hex[:12]
         db.create_job(job_id, "pitch.mp4 (built-in sample)", sample_media)

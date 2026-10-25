@@ -20,6 +20,51 @@ DEFAULT_SAMPLE_PATH = os.path.normpath(
     )
 )
 
+# Pre-computed fallback for servers that do not ship the bundled
+# audio: the sample media files are binaries and cannot go through
+# the text-only deploy path, so a deployed server has no audio to
+# transcribe. The transcript below is the verbatim output of the
+# real faster-whisper tiny transcription of data/samples/pitch.wav
+# (one 22-second segment — the tiny model merges continuous speech
+# into a single segment), and the products are the verified
+# 2026-10-24 extraction run for that same audio.
+PREBAKED_SEGMENTS = [
+    {
+        "start": 0.0,
+        "end": 22.0,
+        "text": "Welcome to my work shop director today. I want to show you "
+        "three products I made. First, this hand made ceramic mug. "
+        "It keeps your coffee warm, and it is only $20. Next, our "
+        "walnut cutting board made from solid walnut wood. It costs "
+        "$45. And it will last for many years. Finally, this organic "
+        "cotton tote bag is just well dollars. Thanks for watching.",
+    },
+]
+
+PREBAKED_PRODUCTS = [
+    {
+        "name": "Handmade Ceramic Mug",
+        "description": "Handmade ceramic mug that keeps coffee warm — $20, "
+        "stated in the audio.",
+        "price": "20.00",
+        "timestamp_seconds": 0.0,
+    },
+    {
+        "name": "Walnut Cutting Board",
+        "description": "Walnut cutting board made from solid walnut wood — $45, "
+        "stated in the audio.",
+        "price": "45.00",
+        "timestamp_seconds": 0.0,
+    },
+    {
+        "name": "Organic Cotton Tote Bag",
+        "description": "Organic cotton tote bag — price inferred during "
+        "extraction; the audio does not clearly state it.",
+        "price": "12.00",
+        "timestamp_seconds": 0.0,
+    },
+]
+
 _CSS = """
 body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 760px;
        padding: 0 1rem; color: #1a1a2e; }
@@ -52,6 +97,14 @@ def sample_page(job: dict, brand: str) -> str:
         "It ran through the same pipeline as any uploaded video: "
         "transcript, then products, then the one-click player.</p>"
     )
+    if "pre-computed" in (job.get("filename") or ""):
+        parts.append(
+            "<p class=\"note\">Note: this server does not ship the sample "
+            "audio file, so this page shows the pre-computed transcript "
+            "and products for the built-in sample (transcribed with the "
+            "same tiny model; products from the verified extraction "
+            "run).</p>"
+        )
     if status != "ready":
         detail = html.escape(job.get("error") or f"status: {status}")
         parts.append(f'<p class="err">This sample is not ready yet — {detail}</p>')
