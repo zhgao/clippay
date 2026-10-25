@@ -25,7 +25,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, pages, sample, urlimport, watch
+from . import config, embed, pages, sample, urlimport, watch
 from .db import Database
 from .extract import ExtractionError, ProductExtractor
 from .paypal import PayPalClient, PayPalError
@@ -355,6 +355,17 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail="video not found")
         return pages.product_page(job, brand)
+
+    # -- Embeddable player (additive; touches no M1/M2 code) -----------
+    @app.get("/embed/{job_id}", response_class=HTMLResponse)
+    def embed_player(job_id: str):
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="video not found")
+        configured = bool(config.PAYPAL_CLIENT_ID and config.PAYPAL_CLIENT_SECRET)
+        return embed.embed_page(
+            job, brand, checkout_mode="sandbox" if configured else "demo"
+        )
 
     @app.get("/dashboard", response_class=HTMLResponse)
     def dashboard():

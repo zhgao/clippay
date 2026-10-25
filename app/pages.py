@@ -162,6 +162,34 @@ def product_page(job: dict, brand: str) -> str:
             f"<button onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
             f"</div>"
         )
+    embed_job_id = json.dumps(job.get("id", ""))
+    parts.append(f"""
+<h2>Embed on your website</h2>
+<p>Copy once, paste it into your own website — shoppers buy right there,
+no detour to another site.</p>
+<textarea id="embed-code" readonly rows="3" style="width:100%"></textarea>
+<p><button id="copy-embed" type="button">Copy embed code</button>
+<span id="copy-msg"></span></p>
+<script>
+(function () {{
+  var code = document.getElementById('embed-code');
+  code.value = '<iframe src="' + window.location.origin + '/embed/'
+    + {embed_job_id} + '" width="100%" height="540" frameborder="0" '
+    + 'allowfullscreen></iframe>';
+  document.getElementById('copy-embed').addEventListener('click', async () => {{
+    var msg = document.getElementById('copy-msg');
+    try {{
+      await navigator.clipboard.writeText(code.value);
+      msg.textContent = 'Copied!';
+    }} catch (e) {{
+      code.select();
+      document.execCommand('copy');
+      msg.textContent = 'Copied!';
+    }}
+  }});
+}})();
+</script>
+""")
     parts.append("""
 <script>
 async function buy(btn, payload) {
