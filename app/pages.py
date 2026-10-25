@@ -15,18 +15,25 @@ from .checkout_errors import (
 )
 
 _CSS = """
-body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 760px;
-       padding: 0 1rem; color: #1a1a2e; }
-h1 { font-size: 1.6rem; } h2 { margin-top: 2rem; }
-.card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem 1.25rem;
-        margin: 1rem 0; }
-.price { font-size: 1.25rem; font-weight: 700; }
-.ts { color: #666; font-size: .85rem; }
-button { background: #0070ba; color: #fff; border: 0; border-radius: 6px;
+/* Same Apple-store-minimal language as the embed player: big rounded
+   player card with a soft shadow, dark frosted-glass overlay cards,
+   pill buttons, and soft-shadow info cards instead of hard-bordered
+   boxes. Functional markers (rail cap, control clearance, snap,
+   single PayPal button per card) are unchanged. */
+body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 760px;
+       padding: 0 1.5rem; color: #1a1a2e; }
+h1 { font-size: 2rem; letter-spacing: -.02em; margin: 0 0 1.5rem; }
+h2 { margin-top: 2.5rem; font-size: 1.25rem; letter-spacing: -.01em; }
+.card { border: 0; border-radius: 16px; padding: 1.25rem 1.5rem;
+        margin: 1rem 0; background: #fff;
+        box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+.price { font-size: 1.3rem; font-weight: 700; }
+.ts { color: #8e8e93; font-size: .85rem; }
+button { background: #0070ba; color: #fff; border: 0; border-radius: 999px;
          padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
 button:disabled { opacity: .5; }
-.confirm { border: 2px solid #2e7d32; border-radius: 10px; padding: 1rem 1.25rem;
-           background: #f1f8f1; }
+.confirm { border: 0; border-radius: 16px; padding: 1rem 1.25rem;
+           background: #f1f8f1; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
 /* Same compact overlay rail as the embed player: cards float over
    the bottom of the video (above the control bar) so shoppers buy
    while watching. The rail ignores clicks except on the cards
@@ -36,24 +43,29 @@ button:disabled { opacity: .5; }
    product info (description, timestamp) lives in the cards below the
    video on this page. The rail scrolls horizontally with snap points
    and end padding, so the last card always slides fully into view. */
-.player-wrap { position: relative; }
-.player-wrap video { display: block; }
+.player-wrap { position: relative; border-radius: 18px; overflow: hidden;
+         background: #000; box-shadow: 0 16px 48px rgba(0,0,0,.20); }
+.player-wrap video { display: block; width: 100%; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 44px;
-         display: flex; gap: .5rem; overflow-x: auto; overflow-y: hidden;
-         padding: .5rem .75rem .5rem .5rem; max-height: 132px;
+         display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
+         padding: .75rem 1rem; max-height: 132px;
          box-sizing: border-box; scroll-snap-type: x mandatory;
-         scroll-padding-right: .75rem; pointer-events: none; }
+         scroll-padding-right: 1rem; pointer-events: none; }
 .overlay-card { pointer-events: auto; flex: 0 0 180px; scroll-snap-align: start;
-         background: rgba(255,255,255,.95);
-         border-radius: 10px; padding: .6rem .75rem; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+         background: rgba(20,20,28,.55);
+         -webkit-backdrop-filter: blur(16px) saturate(1.3);
+         backdrop-filter: blur(16px) saturate(1.3);
+         border: 1px solid rgba(255,255,255,.16);
+         border-radius: 16px; padding: .8rem .9rem;
+         box-shadow: 0 8px 28px rgba(0,0,0,.35); color: #fff; }
 .overlay-card h3 { margin: .25rem 0; font-size: .95rem; white-space: nowrap;
-         overflow: hidden; text-overflow: ellipsis; }
-.overlay-card .price { font-size: 1.05rem; margin: .25rem 0; }
+         overflow: hidden; text-overflow: ellipsis; color: #fff; }
+.overlay-card .price { font-size: 1.15rem; margin: .35rem 0 .5rem; color: #fff; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border-bottom: 1px solid #e5e5e5; padding: .45rem .5rem;
          text-align: left; font-size: .92rem; }
 .err { color: #b00020; }
-footer { margin-top: 3rem; color: #888; font-size: .8rem; }
+footer { margin-top: 3rem; color: #8e8e93; font-size: .75rem; }
 """
 
 
@@ -241,6 +253,7 @@ def _sdk_script() -> str:
         if (fallback) fallback.style.display = 'none';
         paypal.Buttons({
           fundingSource: paypal.FUNDING.PAYPAL,
+          style: { shape: 'pill', height: 40 },
           createOrder: function () {
             return fetch('/api/orders', {
               method: 'POST',

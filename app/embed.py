@@ -28,17 +28,28 @@ from .checkout_errors import (
 )
 
 _CSS = """
-body { font-family: system-ui, sans-serif; margin: 1rem auto; max-width: 720px;
-       padding: 0 1rem; color: #1a1a2e; }
-h1 { font-size: 1.25rem; }
-.badge { display: inline-block; background: #fff3cd; border: 1px solid #e6c87a;
-         border-radius: 999px; padding: .25rem .8rem; font-size: .85rem; }
-.card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem 1.25rem;
-        margin: 1rem 0; }
+/* Apple-store-minimal visual language for the embed player: the page
+   itself is transparent (it lives inside other people's sites), the
+   player is one big rounded card with a soft shadow, and the overlay
+   cards are dark frosted glass — no hard white boxes, no loud chrome.
+   All functional markers stay exactly as the tests pin them: rail
+   height cap, control-bar clearance, snap scrolling, one PayPal
+   button per card. */
+body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
+       padding: 0 1rem 1rem; background: transparent; color: #1a1a2e; }
+.badge { display: inline-block; background: rgba(20,20,28,.55); color: #fff;
+         -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+         border: 0; border-radius: 999px; padding: .35rem .8rem;
+         font-size: .72rem; letter-spacing: .01em; }
+.badge-float { position: absolute; top: .75rem; left: .75rem; z-index: 2;
+         pointer-events: none; }
+.card { border: 0; border-radius: 16px; padding: 1.25rem 1.5rem;
+        margin: 1rem 0; background: #fff;
+        box-shadow: 0 4px 24px rgba(0,0,0,.08); }
 .price { font-size: 1.25rem; font-weight: 700; }
-.ts { color: #666; font-size: .85rem; }
-.note { color: #666; font-size: .85rem; }
-button { background: #0070ba; color: #fff; border: 0; border-radius: 6px;
+.ts { color: #8e8e93; font-size: .85rem; }
+.note { color: #8e8e93; font-size: .75rem; }
+button { background: #0070ba; color: #fff; border: 0; border-radius: 999px;
          padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
 button:disabled { opacity: .5; }
 /* Compact overlay rail: product cards float over the bottom of the
@@ -53,23 +64,28 @@ button:disabled { opacity: .5; }
    scrolls horizontally with snap points and end padding, so the last
    card always slides fully into view instead of stopping half-cut at
    the edge. */
-.player-wrap { position: relative; }
-.player-wrap video { display: block; }
+.player-wrap { position: relative; border-radius: 18px; overflow: hidden;
+         background: #000; box-shadow: 0 16px 48px rgba(0,0,0,.20); }
+.player-wrap video { display: block; width: 100%; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 44px;
-         display: flex; gap: .5rem; overflow-x: auto; overflow-y: hidden;
-         padding: .5rem .75rem .5rem .5rem; max-height: 132px;
+         display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
+         padding: .75rem 1rem; max-height: 132px;
          box-sizing: border-box; scroll-snap-type: x mandatory;
-         scroll-padding-right: .75rem; pointer-events: none; }
+         scroll-padding-right: 1rem; pointer-events: none; }
 .overlay-card { pointer-events: auto; flex: 0 0 180px; scroll-snap-align: start;
-         background: rgba(255,255,255,.95);
-         border-radius: 10px; padding: .6rem .75rem; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+         background: rgba(20,20,28,.55);
+         -webkit-backdrop-filter: blur(16px) saturate(1.3);
+         backdrop-filter: blur(16px) saturate(1.3);
+         border: 1px solid rgba(255,255,255,.16);
+         border-radius: 16px; padding: .8rem .9rem;
+         box-shadow: 0 8px 28px rgba(0,0,0,.35); color: #fff; }
 .overlay-card h3 { margin: .25rem 0; font-size: .95rem; white-space: nowrap;
-         overflow: hidden; text-overflow: ellipsis; }
-.overlay-card .price { font-size: 1.05rem; margin: .25rem 0; }
-.confirm { border: 2px solid #2e7d32; border-radius: 10px; padding: 1rem 1.25rem;
-           background: #f1f8f1; }
+         overflow: hidden; text-overflow: ellipsis; color: #fff; }
+.overlay-card .price { font-size: 1.15rem; margin: .35rem 0 .5rem; color: #fff; }
+.confirm { border: 0; border-radius: 16px; padding: 1rem 1.25rem;
+           background: #f1f8f1; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
 .err { color: #b00020; }
-.brandline { color: #888; font-size: .8rem; margin-top: 2rem; }
+.brandline { color: #8e8e93; font-size: .72rem; margin-top: 1rem; }
 """
 
 
@@ -173,6 +189,7 @@ def _sdk_script() -> str:
         if (fallback) fallback.style.display = 'none';
         paypal.Buttons({
           fundingSource: paypal.FUNDING.PAYPAL,
+          style: { shape: 'pill', height: 40 },
           createOrder: function () {
             return fetch('/api/orders', {
               method: 'POST',
@@ -250,8 +267,15 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
         badge = "Sandbox checkout — PayPal Sandbox, no real money moves."
     else:
         badge = "Demo mode — mock checkout, no real payment is made."
-    parts = [f"<h1>{html.escape(title)}</h1>", f'<p><span class="badge">{badge}</span></p>']
+    # Dechromed: no filename heading on the embed page — it lives in
+    # other people's sites, so the player itself is the whole page.
+    # The mode chip floats over the video's top-left corner when there
+    # is a video, and sits in flow otherwise. The filename stays only
+    # in the <title> tag (browser tab), never as visible chrome.
+    badge_span = f'<span class="badge">{badge}</span>'
+    parts = []
     if status != "ready":
+        parts.append(f"<p>{badge_span}</p>")
         detail = html.escape(job.get("error") or f"status: {status}")
         parts.append(f'<p class="err">This player is not ready yet — {detail}</p>')
         body = "".join(parts)
@@ -265,14 +289,17 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
             f'<video controls playsinline preload="metadata" '
             f'style="width:100%" src="{video_url}"></video>'
         )
+        chip = f'<span class="badge badge-float">{badge}</span>'
         if products:
             rail = "".join(_card_html(p, sdk, overlay=True) for p in products)
             parts.append(
-                f'<div class="player-wrap">{video_tag}'
+                f'<div class="player-wrap">{chip}{video_tag}'
                 f'<div class="overlay-rail">{rail}</div></div>'
             )
         else:
-            parts.append(video_tag)
+            parts.append(f'<div class="player-wrap">{chip}{video_tag}</div>')
+    else:
+        parts.append(f"<p>{badge_span}</p>")
     if not products:
         parts.append("<p>No purchasable products were found in this video.</p>")
     elif not has_video:
