@@ -148,6 +148,8 @@ def watch_page(brand: str, checkout_mode: str = "demo") -> str:
     body = f"""
 <h1>{html.escape(brand)} — In-video shopping demo</h1>
 <p><span class="badge">{badge}</span></p>
+<p><button id="sample-btn" type="button">Try the sample instantly — no upload
+needed</button> <span id="sample-msg" class="note"></span></p>
 <div class="layout">
   <div class="player">
     <video id="demo-video" controls autoplay muted loop playsinline
@@ -167,6 +169,18 @@ audio did not clearly state that price, and this page does not claim
 the video spoke it.</p>
 <p><a href="/dashboard">Seller dashboard</a></p>
 <script>
+document.getElementById('sample-btn').addEventListener('click', async () => {{
+  const msg = document.getElementById('sample-msg');
+  msg.textContent = 'Running the built-in sample…';
+  try {{
+    const r = await fetch('/api/videos/sample', {{method: 'POST'}});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'sample failed');
+    window.location = '/sample/' + data.id;
+  }} catch (err) {{
+    msg.innerHTML = '<span class="err">' + err.message + '</span>';
+  }}
+}});
 const fallback = document.getElementById('fallback');
 const video = document.getElementById('demo-video');
 function showFallback() {{

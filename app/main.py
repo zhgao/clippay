@@ -14,6 +14,9 @@ Endpoints:
   GET  /watch/demo                    demo in-video shopping player (new)
   GET  /watch/demo/video              demo video file (new)
   POST /api/watch/demo/checkout       labelled mock checkout (new)
+  POST /api/videos/from-url           paste a video link -> same pipeline
+  POST /api/videos/sample            one-click built-in pitch sample
+  GET  /sample/{job_id}               sample result: transcript + products
 """
 import os
 import uuid
@@ -22,7 +25,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, pages, watch
+from . import config, pages, sample, urlimport, watch
 from .db import Database
 from .extract import ExtractionError, ProductExtractor
 from .paypal import PayPalClient, PayPalError
@@ -50,6 +53,10 @@ class DemoCheckoutRequest(BaseModel):
     description: str | None = None
 
 
+class FromUrlRequest(BaseModel):
+    url: str = Field(..., description="YouTube, TikTok, or Instagram video URL")
+
+
 class DemoCheckoutResponse(BaseModel):
     order_id: str
     mode: str = "mock"
@@ -67,6 +74,8 @@ def create_app(
     extractor: ProductExtractor | None = None,
     upload_dir: str | None = None,
     demo_video_path: str | None = None,
+    url_importer: urlimport.UrlImporter | None = None,
+    sample_media_path: str | None = None,
 ) -> FastAPI:
     db = db or Database(config.DATABASE_PATH)
     paypal = paypal or PayPalClient(
@@ -87,6 +96,8 @@ def create_app(
     upload_dir = upload_dir or config.UPLOAD_DIR
     os.makedirs(upload_dir, exist_ok=True)
     demo_video = demo_video_path or watch.DEFAULT_DEMO_VIDEO_PATH
+    importer = url_importer or urlimport.UrlImporter()
+    sample_media = sample_media_path or sample.DEFAULT_SAMPLE_PATH
     brand = config.APP_BRAND_NAME
 
     app = FastAPI(title="ClipPay", version="0.2.0")
@@ -215,6 +226,26 @@ def create_app(
         return {"received": True, "event_type": event_type}
 
     # -- M2: video pipeline -------------------------------------------------
+    def _run_extraction(job_id: str, segments: list) -> dict:
+        """Shared extraction half of the pipeline (upload / URL / sample).
+
+        The caller has already produced transcript segments and recorded
+        them; this runs extraction and lands the job in 'ready' or
+        'failed'. Upload behaviour is unchanged: it used to do exactly
+        these steps inline.
+        """
+        try:
+            db.update_job(job_id, status="extracting", segments=segments)
+            products = extractor.extract_products(segments)
+            return db.update_job(job_id, status="ready", products=products)
+        except (TranscriptionError, ExtractionError) as exc:
+            return db.update_job(job_id, status="failed", error=str(exc))
+        except Exception as exc:  # defensive: never leave a job hanging
+            return db.update_job(
+                job_id, status="failed",
+                error=f"unexpected pipeline error: {exc}",
+            )
+
     def _process_job(job_id: str) -> dict:
         """Run transcription + extraction for an uploaded job.
 
@@ -225,9 +256,7 @@ def create_app(
         try:
             db.update_job(job_id, status="transcribing")
             segments = transcriber.transcribe(job["stored_path"])
-            db.update_job(job_id, status="extracting", segments=segments)
-            products = extractor.extract_products(segments)
-            return db.update_job(job_id, status="ready", products=products)
+            return _run_extraction(job_id, segments)
         except (TranscriptionError, ExtractionError) as exc:
             return db.update_job(job_id, status="failed", error=str(exc))
         except Exception as exc:  # defensive: never leave a job hanging
@@ -250,6 +279,56 @@ def create_app(
                 out.write(chunk)
         db.create_job(job_id, filename, stored_path)
         return _process_job(job_id)
+
+    # -- URL import + one-click sample (additive; pipeline shared) ------
+    @app.post("/api/videos/from-url", status_code=201)
+    def import_video_from_url(body: FromUrlRequest):
+        """Paste a video link instead of uploading a file.
+
+        Import failures (bad link, unsupported platform, captions and
+        download both failing) return a clear HTTP error and create no
+        job — the caller gets a readable reason, never a half-empty
+        product page. A successful import runs the same extraction step
+        as an upload and returns the same job record.
+        """
+        try:
+            result = importer.import_from_url(
+                body.url, transcriber, work_dir=upload_dir
+            )
+        except urlimport.UrlImportError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc))
+        job_id = uuid.uuid4().hex[:12]
+        # Captions path: no file exists, so the stored path stays empty;
+        # download path: the audio file the importer produced.
+        stored_path = result.get("audio_path") or ""
+        db.create_job(job_id, body.url.strip(), stored_path)
+        db.update_job(job_id, status="transcribing")
+        return _run_extraction(job_id, result["segments"])
+
+    @app.post("/api/videos/sample", status_code=201)
+    def run_sample_video():
+        """One-click demo: run the built-in pitch sample, no upload.
+
+        Transcribes the bundled pitch sample through the normal
+        pipeline and returns the same job record as an upload. The
+        sample page (/sample/{job_id}) shows the transcript and
+        products, then links into the one-click player.
+        """
+        if not os.path.isfile(sample_media):
+            raise HTTPException(
+                status_code=404,
+                detail="built-in sample media not found on this server",
+            )
+        job_id = uuid.uuid4().hex[:12]
+        db.create_job(job_id, "pitch.mp4 (built-in sample)", sample_media)
+        return _process_job(job_id)
+
+    @app.get("/sample/{job_id}", response_class=HTMLResponse)
+    def sample_result_page(job_id: str):
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="sample not found")
+        return sample.sample_page(job, brand)
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str):

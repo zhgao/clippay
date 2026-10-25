@@ -56,6 +56,19 @@ where every item can be bought with PayPal.</p>
   <input type="file" id="file" accept="video/mp4,.mp4" required>
   <button type="submit">Upload &amp; analyze</button>
 </form>
+<h2>Or paste a video link — no upload needed</h2>
+<form id="url-form">
+  <input type="url" id="video-url" size="48"
+         placeholder="YouTube, TikTok, or Instagram video URL" required>
+  <button type="submit">Import &amp; analyze</button>
+</form>
+<p class="ts">YouTube captions are tried first (most reliable). TikTok and
+Instagram go through a download step, which is best-effort — those
+platforms may block automated downloads, so imports there are not
+guaranteed to succeed.</p>
+<h2>Just want to see it work?</h2>
+<p><button id="sample-btn" type="button">Try the demo instantly — no upload
+needed</button></p>
 <p id="msg"></p>
 <p><a href="/dashboard">Seller dashboard</a></p>
 <script>
@@ -72,6 +85,37 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'upload failed');
     window.location = '/p/' + data.id;
+  }} catch (err) {{
+    msg.innerHTML = '<span class="err">' + err.message + '</span>';
+  }}
+}});
+document.getElementById('url-form').addEventListener('submit', async (e) => {{
+  e.preventDefault();
+  const msg = document.getElementById('msg');
+  const url = document.getElementById('video-url').value.trim();
+  if (!url) return;
+  msg.textContent = 'Importing and analyzing… this can take a moment.';
+  try {{
+    const r = await fetch('/api/videos/from-url', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{url: url}})
+    }});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'import failed');
+    window.location = '/p/' + data.id;
+  }} catch (err) {{
+    msg.innerHTML = '<span class="err">' + err.message + '</span>';
+  }}
+}});
+document.getElementById('sample-btn').addEventListener('click', async () => {{
+  const msg = document.getElementById('msg');
+  msg.textContent = 'Running the built-in sample…';
+  try {{
+    const r = await fetch('/api/videos/sample', {{method: 'POST'}});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'sample failed');
+    window.location = '/sample/' + data.id;
   }} catch (err) {{
     msg.innerHTML = '<span class="err">' + err.message + '</span>';
   }}
