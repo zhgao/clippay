@@ -125,7 +125,7 @@ document.getElementById('sample-btn').addEventListener('click', async () => {{
     return _page("Upload a video", brand, body)
 
 
-def product_page(job: dict, brand: str) -> str:
+def product_page(job: dict, brand: str, has_video: bool = False) -> str:
     title = job.get("filename") or "Video"
     status = job.get("status", "")
     parts = [f"<h1>{html.escape(title)}</h1>"]
@@ -135,6 +135,12 @@ def product_page(job: dict, brand: str) -> str:
         parts.append('<p><a href="/dashboard">Seller dashboard</a></p>')
         return _page(title, brand, "".join(parts))
 
+    if has_video:
+        video_url = f"/api/jobs/{html.escape(job.get('id', ''))}/video"
+        parts.append(
+            f'<video controls playsinline preload="metadata" '
+            f'style="width:100%" src="{video_url}"></video>'
+        )
     products = job.get("products") or []
     if not products:
         parts.append("<p>No purchasable products were found in this video.</p>")

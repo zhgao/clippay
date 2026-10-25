@@ -9,6 +9,7 @@ Endpoints:
   POST /api/webhooks/paypal           PayPal webhook receiver (verified)
   POST /api/videos                    upload an mp4 -> transcribe -> extract
   GET  /api/jobs/{job_id}             pipeline job record
+  GET  /api/jobs/{job_id}/video       serve the uploaded video (Range supported)
   GET  /p/{job_id}                    shoppable page for a processed video
   GET  /dashboard                     seller dashboard (jobs + orders)
   GET  /watch/demo                    demo in-video shopping player (new)
@@ -25,7 +26,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import config, embed, pages, sample, urlimport, watch
+from . import config, embed, pages, sample, urlimport, video, watch
 from .db import Database
 from .extract import ExtractionError, ProductExtractor
 from .paypal import PayPalClient, PayPalError
@@ -349,12 +350,33 @@ def create_app(
             raise HTTPException(status_code=404, detail="job not found")
         return job
 
+    @app.get("/api/jobs/{job_id}/video")
+    def job_video(job_id: str):
+        """Serve the uploaded video for one job, with Range support.
+
+        Same visibility as the product page: anyone with the job_id
+        can watch. Unknown jobs, jobs without media, and stored paths
+        escaping the upload directory all get 404 — never a file
+        outside the upload directory, never a caller-chosen path.
+        """
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        path = video.resolve_job_video_path(job, upload_dir)
+        if path is None:
+            raise HTTPException(
+                status_code=404, detail="no video available for this job"
+            )
+        return FileResponse(path, media_type="video/mp4")
+
     @app.get("/p/{job_id}", response_class=HTMLResponse)
     def product_page(job_id: str):
         job = db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="video not found")
-        return pages.product_page(job, brand)
+        return pages.product_page(
+            job, brand, has_video=video.job_has_video(job, upload_dir)
+        )
 
     # -- Embeddable player (additive; touches no M1/M2 code) -----------
     @app.get("/embed/{job_id}", response_class=HTMLResponse)
@@ -364,7 +386,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="video not found")
         configured = bool(config.PAYPAL_CLIENT_ID and config.PAYPAL_CLIENT_SECRET)
         return embed.embed_page(
-            job, brand, checkout_mode="sandbox" if configured else "demo"
+            job, brand,
+            checkout_mode="sandbox" if configured else "demo",
+            has_video=video.job_has_video(job, upload_dir),
         )
 
     @app.get("/dashboard", response_class=HTMLResponse)

@@ -46,7 +46,8 @@ def _fmt_ts(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-def embed_page(job: dict, brand: str, checkout_mode: str = "demo") -> str:
+def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
+               has_video: bool = False) -> str:
     """Render the chromeless embeddable player for one ready job."""
     title = job.get("filename") or "Video"
     status = job.get("status", "")
@@ -61,6 +62,12 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo") -> str:
         body = "".join(parts)
         return _wrap(title, brand, body)
 
+    if has_video:
+        video_url = f"/api/jobs/{html.escape(job.get('id', ''))}/video"
+        parts.append(
+            f'<video controls playsinline preload="metadata" '
+            f'style="width:100%" src="{video_url}"></video>'
+        )
     products = job.get("products") or []
     if not products:
         parts.append("<p>No purchasable products were found in this video.</p>")
