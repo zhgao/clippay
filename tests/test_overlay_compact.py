@@ -163,8 +163,10 @@ def test_rail_height_capped_and_scrolls_with_snap():
     assert "scroll-snap-align: start" in html
     assert "scroll-padding-right:" in html
     assert "flex: 0 0 180px" in html
-    # Control bar still cleared, clicks still pass through to video.
-    assert "bottom: 44px" in html
+    # Control bar still cleared (raised to 64px in the second visual
+    # polish so no button edge is pressed by the progress bar), clicks
+    # still pass through to video.
+    assert "bottom: 64px" in html
     assert "pointer-events: none" in html
     assert "pointer-events: auto" in html
 

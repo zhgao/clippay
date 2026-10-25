@@ -123,7 +123,9 @@ def test_overlay_clears_controls_and_clicks_pass_through():
         _job_dict(), "ClipPay", checkout_mode="sandbox",
         has_video=True, paypal_client_id="TEST-CLIENT-ID",
     )
-    assert "bottom: 44px" in html
+    # Raised from 44px in the second visual polish so no button edge
+    # is ever pressed or clipped by the progress bar.
+    assert "bottom: 64px" in html
     assert "pointer-events: none" in html
     assert "pointer-events: auto" in html
 

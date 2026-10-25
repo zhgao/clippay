@@ -55,24 +55,30 @@ button:disabled { opacity: .5; }
 /* Compact overlay rail: product cards float over the bottom of the
    video so a shopper can tap to buy while watching, without leaving
    the video. The rail itself ignores clicks (video controls stay
-   usable) and only the cards respond. It sits above the control bar
-   (~44px) so it never covers play/seek, and its height is capped so
-   the video body stays visible: overlay cards carry name + price +
-   one PayPal button only — no long description, no timestamp line.
-   Cards are always visible — never gated per second, because
-   transcription timestamps are too coarse to trigger on. The rail
-   scrolls horizontally with snap points and end padding, so the last
-   card always slides fully into view instead of stopping half-cut at
-   the edge. */
+   usable) and only the cards respond. It sits well above the control
+   bar (~64px of clearance) so no button edge is ever pressed or
+   clipped by the progress bar, and its height is capped so the video
+   body stays visible: overlay cards carry name + price + one PayPal
+   button only — no long description, no timestamp line. Cards are
+   always visible — never gated per second, because transcription
+   timestamps are too coarse to trigger on. The rail is centered
+   (safe center: on narrow screens it falls back to start alignment
+   so the first card stays reachable) and scrolls horizontally with
+   snap points and end padding, so the last card always slides fully
+   into view instead of stopping half-cut at the edge. Each card is
+   one flex-column component: name + price + a buy area pinned to the
+   card's foot, so the button can never drift below the card. */
 .player-wrap { position: relative; border-radius: 18px; overflow: hidden;
          background: #000; box-shadow: 0 16px 48px rgba(0,0,0,.20); }
 .player-wrap video { display: block; width: 100%; }
-.overlay-rail { position: absolute; left: 0; right: 0; bottom: 44px;
+.overlay-rail { position: absolute; left: 0; right: 0; bottom: 64px;
          display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
          padding: .75rem 1rem; max-height: 132px;
          box-sizing: border-box; scroll-snap-type: x mandatory;
-         scroll-padding-right: 1rem; pointer-events: none; }
+         scroll-padding-right: 1rem; pointer-events: none;
+         justify-content: safe center; }
 .overlay-card { pointer-events: auto; flex: 0 0 180px; scroll-snap-align: start;
+         display: flex; flex-direction: column;
          background: rgba(20,20,28,.55);
          -webkit-backdrop-filter: blur(16px) saturate(1.3);
          backdrop-filter: blur(16px) saturate(1.3);
@@ -82,6 +88,21 @@ button:disabled { opacity: .5; }
 .overlay-card h3 { margin: .25rem 0; font-size: .95rem; white-space: nowrap;
          overflow: hidden; text-overflow: ellipsis; color: #fff; }
 .overlay-card .price { font-size: 1.15rem; margin: .35rem 0 .5rem; color: #fff; }
+.overlay-card .card-buy { margin-top: auto; }
+/* Neutral fallback buy button (SDK-failure path only): light grey
+   pill, dark text — readable on both the dark glass overlay cards
+   and the white below-video cards, and never the loud blue rectangle.
+   The page's primary buttons keep the blue. */
+.fallback-buy { background: #e8e8ed; color: #1a1a2e; border: 0; }
+/* Subtle focus ring only: thin and light, never the browser's thick
+   default blue box. focus-visible (not :focus) keeps keyboard focus
+   visible without painting a ring on every mouse click. */
+button:focus-visible { outline: 2px solid rgba(0,112,186,.45); outline-offset: 2px; }
+.overlay-card button:focus-visible { outline-color: rgba(255,255,255,.65); }
+/* Status line (cancel/blocked notes) at footnote grade: small and
+   muted, so a cancel never outranks the content. Real failures keep
+   their red .err span inside it. */
+#msg { color: #8e8e93; font-size: .75rem; }
 .confirm { border: 0; border-radius: 16px; padding: 1rem 1.25rem;
            background: #f1f8f1; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
 .err { color: #b00020; }
@@ -96,9 +117,15 @@ def _fmt_ts(seconds: float) -> str:
 
 def _card_html(product: dict, sdk: bool, overlay: bool) -> str:
     """One product card. In SDK mode it also carries the PayPal Buttons
-    container; the fallback Buy button stays in the markup and is only
-    hidden by JS once the SDK actually renders, so a failed SDK load
-    leaves the old redirect-or-mock flow intact."""
+    container; both the Buttons container and the fallback Buy button
+    live inside one .card-buy area within the card, so the card and
+    its button are a single component — the button can never hang
+    below the card onto the video. In SDK mode the fallback button is
+    hidden from first paint (no blue flash while the SDK loads) and is
+    only revealed by JS if the SDK fails to render within its retry
+    budget or a render throws; on SDK success it stays hidden. In
+    non-SDK mode there is no SDK script, so the fallback stays
+    visible as the only buy path."""
     name = html.escape(product.get("name", ""))
     desc = html.escape(product.get("description", ""))
     price = html.escape(str(product.get("price", "")))
@@ -120,6 +147,12 @@ def _card_html(product: dict, sdk: bool, overlay: bool) -> str:
             f'data-amount="{html.escape(str(product.get("price", "")), quote=True)}" '
             f'data-description="{html.escape(product.get("name", ""), quote=True)}"></div>'
         )
+    fallback_style = ' style="display:none"' if sdk else ""
+    buy_block = (
+        f'<div class="card-buy">{pp}<button class="fallback-buy"'
+        f"{fallback_style} "
+        f"onclick='buy(this, {buy_arg})'>Buy with PayPal</button></div>"
+    )
     if overlay:
         # Compact overlay card: name + price + buy only. The long
         # description and the timestamp line would push the card to
@@ -127,8 +160,7 @@ def _card_html(product: dict, sdk: bool, overlay: bool) -> str:
         return (
             f'<div class="{cls}"><h3>{name}</h3>'
             f'<p class="price">${price}</p>'
-            f"{pp}<button class=\"fallback-buy\" "
-            f"onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
+            f"{buy_block}"
             f"</div>"
         )
     return (
@@ -136,8 +168,7 @@ def _card_html(product: dict, sdk: bool, overlay: bool) -> str:
         f"<p>{desc}</p>"
         f'<p class="price">${price}</p>'
         f'<p class="ts">Mentioned at {ts} in the video</p>'
-        f"{pp}<button class=\"fallback-buy\" "
-        f"onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
+        f"{buy_block}"
         f"</div>"
     )
 
@@ -155,7 +186,13 @@ def _sdk_script() -> str:
     One PayPal button per card only: the SDK URL disables the
     paylater and card funding sources and Buttons is pinned to the
     PayPal funding source, so the overlay cards stay compact instead
-    of stacking three tall buttons each.
+    of stacking three tall buttons each. The button is silver — the
+    quietest PayPal color on the dark glass cards — and stays pill
+    shaped. The fallback Buy button is hidden from first paint in
+    SDK mode (server-rendered display:none, so no blue flash while
+    the SDK loads) and is only revealed if the SDK fails to arrive
+    within its retry budget or a render throws; on SDK success it
+    stays hidden.
 
     Error display distinguishes a cancel from a real failure: the SDK
     reports a closed popup as an error ("Window is closed, can not
@@ -180,6 +217,10 @@ def _sdk_script() -> str:
     return 'failure';
   }
   var tries = 0;
+  function showFallback(el) {
+    var fb = el.parentElement.querySelector('.fallback-buy');
+    if (fb) fb.style.display = 'inline-block';
+  }
   function init() {
     if (window.paypal && window.paypal.Buttons) {
       document.querySelectorAll('.pp-buttons').forEach(function (el) {
@@ -187,9 +228,10 @@ def _sdk_script() -> str:
         var desc = el.getAttribute('data-description');
         var fallback = el.parentElement.querySelector('.fallback-buy');
         if (fallback) fallback.style.display = 'none';
-        paypal.Buttons({
-          fundingSource: paypal.FUNDING.PAYPAL,
-          style: { shape: 'pill', height: 40 },
+        try {
+          var rendered = paypal.Buttons({
+            fundingSource: paypal.FUNDING.PAYPAL,
+            style: { shape: 'pill', height: 40, color: 'silver' },
           createOrder: function () {
             return fetch('/api/orders', {
               method: 'POST',
@@ -232,11 +274,22 @@ def _sdk_script() -> str:
             }
           }
         }).render(el);
+        } catch (e) { showFallback(el); }
+        if (rendered && typeof rendered.catch === 'function') {
+          rendered.catch(function () { showFallback(el); });
+        }
       });
       return;
     }
-    if (++tries < 50) setTimeout(init, 100);
-    // SDK never arrived — the fallback Buy buttons stay visible.
+    if (++tries < 50) {
+      setTimeout(init, 100);
+    } else {
+      // SDK never arrived within budget — reveal the fallback Buy
+      // buttons (hidden by default in SDK mode to avoid the flash).
+      document.querySelectorAll('.fallback-buy').forEach(function (b) {
+        b.style.display = 'inline-block';
+      });
+    }
   }
   init();
 })();
@@ -261,7 +314,10 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
     video page; without credentials the old redirect-or-mock flow
     stays. Jobs without a video keep the classic below-video cards.
     """
-    title = job.get("filename") or "Video"
+    # Generic tab title on purpose: the embed page lives in other
+    # people's sites, so the browser tab must not leak the creator's
+    # source filename. (The product page keeps its filename title.)
+    title = "Shoppable video"
     status = job.get("status", "")
     if checkout_mode == "sandbox":
         badge = "Sandbox checkout — PayPal Sandbox, no real money moves."
@@ -270,8 +326,8 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
     # Dechromed: no filename heading on the embed page — it lives in
     # other people's sites, so the player itself is the whole page.
     # The mode chip floats over the video's top-left corner when there
-    # is a video, and sits in flow otherwise. The filename stays only
-    # in the <title> tag (browser tab), never as visible chrome.
+    # is a video, and sits in flow otherwise. The filename appears
+    # nowhere on this page, not even in the <title> tag.
     badge_span = f'<span class="badge">{badge}</span>'
     parts = []
     if status != "ready":
