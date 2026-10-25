@@ -374,8 +374,12 @@ def create_app(
         job = db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="video not found")
+        configured = bool(config.PAYPAL_CLIENT_ID and config.PAYPAL_CLIENT_SECRET)
         return pages.product_page(
-            job, brand, has_video=video.job_has_video(job, upload_dir)
+            job, brand, has_video=video.job_has_video(job, upload_dir),
+            # SDK popup only when real checkout can work; otherwise the
+            # page keeps its old redirect buy flow.
+            paypal_client_id=config.PAYPAL_CLIENT_ID if configured else "",
         )
 
     # -- Embeddable player (additive; touches no M1/M2 code) -----------
@@ -389,6 +393,7 @@ def create_app(
             job, brand,
             checkout_mode="sandbox" if configured else "demo",
             has_video=video.job_has_video(job, upload_dir),
+            paypal_client_id=config.PAYPAL_CLIENT_ID if configured else "",
         )
 
     @app.get("/dashboard", response_class=HTMLResponse)

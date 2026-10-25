@@ -34,6 +34,21 @@ h1 { font-size: 1.25rem; }
 button { background: #0070ba; color: #fff; border: 0; border-radius: 6px;
          padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
 button:disabled { opacity: .5; }
+/* Overlay rail: product cards float over the bottom of the video so a
+   shopper can tap to buy while watching, without leaving the video.
+   The rail itself ignores clicks (video controls stay usable) and only
+   the cards respond. It sits above the control bar (~44px) so it never
+   covers play/seek. Cards are always visible — never gated per second,
+   because transcription timestamps are too coarse to trigger on. */
+.player-wrap { position: relative; }
+.player-wrap video { display: block; }
+.overlay-rail { position: absolute; left: 0; right: 0; bottom: 44px;
+         display: flex; gap: .75rem; overflow-x: auto; padding: .5rem;
+         pointer-events: none; }
+.overlay-card { pointer-events: auto; flex: 0 0 220px; background: rgba(255,255,255,.95);
+         border-radius: 10px; padding: .75rem 1rem; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+.overlay-card h3 { margin: .25rem 0; font-size: 1rem; }
+.overlay-card .price { font-size: 1.1rem; }
 .confirm { border: 2px solid #2e7d32; border-radius: 10px; padding: 1rem 1.25rem;
            background: #f1f8f1; }
 .err { color: #b00020; }
@@ -46,9 +61,122 @@ def _fmt_ts(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+def _card_html(product: dict, sdk: bool, overlay: bool) -> str:
+    """One product card. In SDK mode it also carries the PayPal Buttons
+    container; the fallback Buy button stays in the markup and is only
+    hidden by JS once the SDK actually renders, so a failed SDK load
+    leaves the old redirect-or-mock flow intact."""
+    name = html.escape(product.get("name", ""))
+    desc = html.escape(product.get("description", ""))
+    price = html.escape(str(product.get("price", "")))
+    ts = _fmt_ts(float(product.get("timestamp_seconds", 0)))
+    buy_arg = json.dumps(
+        {"amount": str(product.get("price", "")), "description": product.get("name", "")}
+    )
+    buy_arg = (
+        buy_arg.replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("'", "\\u0027")
+    )
+    cls = "card overlay-card" if overlay else "card"
+    pp = ""
+    if sdk:
+        pp = (
+            f'<div class="pp-buttons" '
+            f'data-amount="{html.escape(str(product.get("price", "")), quote=True)}" '
+            f'data-description="{html.escape(product.get("name", ""), quote=True)}"></div>'
+        )
+    return (
+        f'<div class="{cls}"><h3>{name}</h3>'
+        f"<p>{desc}</p>"
+        f'<p class="price">${price}</p>'
+        f'<p class="ts">Mentioned at {ts} in the video</p>'
+        f"{pp}<button class=\"fallback-buy\" "
+        f"onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
+        f"</div>"
+    )
+
+
+def _sdk_script() -> str:
+    """PayPal JS SDK popup checkout. Only rendered when server-side
+    credentials are configured (sandbox mode + client id).
+
+    The client id is PayPal's public identifier — the SDK is designed
+    to live in the page. The Secret never leaves the server: order
+    creation and capture keep going through the existing M1 endpoints.
+    If the SDK never loads, this script simply never runs and the
+    fallback Buy buttons stay visible.
+    """
+    return """
+<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD" async></script>
+<script>
+(function () {
+  var tries = 0;
+  function init() {
+    if (window.paypal && window.paypal.Buttons) {
+      document.querySelectorAll('.pp-buttons').forEach(function (el) {
+        var amount = el.getAttribute('data-amount');
+        var desc = el.getAttribute('data-description');
+        var fallback = el.parentElement.querySelector('.fallback-buy');
+        if (fallback) fallback.style.display = 'none';
+        paypal.Buttons({
+          createOrder: function () {
+            return fetch('/api/orders', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({amount: amount, currency: 'USD',
+                                    description: desc})
+            }).then(function (r) {
+              return r.json().then(function (d) {
+                if (!r.ok || !d.order_id) throw new Error(d.detail || 'order failed');
+                return d.order_id;
+              });
+            });
+          },
+          onApprove: function (data) {
+            return fetch('/api/orders/' + encodeURIComponent(data.orderID) + '/capture', {method: 'POST'})
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                var confirm = document.getElementById('confirm');
+                confirm.innerHTML = '<h3>Payment complete</h3>'
+                  + '<p><b>' + desc + '</b> — $' + amount + '</p>'
+                  + '<p>PayPal order: ' + data.orderID + '</p>'
+                  + '<p>Status: ' + (d.status || 'COMPLETED') + '</p>';
+                confirm.className = 'confirm';
+                confirm.style.display = 'block';
+              });
+          },
+          onCancel: function () {
+            document.getElementById('msg').textContent = 'Payment cancelled — the video is still here.';
+          },
+          onError: function (err) {
+            document.getElementById('msg').innerHTML = '<span class="err">Checkout failed: ' + err.message + '</span>';
+          }
+        }).render(el);
+      });
+      return;
+    }
+    if (++tries < 50) setTimeout(init, 100);
+    // SDK never arrived — the fallback Buy buttons stay visible.
+  }
+  init();
+})();
+</script>
+"""
+
+
 def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
-               has_video: bool = False) -> str:
-    """Render the chromeless embeddable player for one ready job."""
+               has_video: bool = False, paypal_client_id: str = "") -> str:
+    """Render the chromeless embeddable player for one ready job.
+
+    When the job has a video, the product cards ride as a horizontal
+    rail overlaid on the bottom of the video (above the control bar),
+    always visible — never gated per second. In sandbox mode the cards
+    check out through a PayPal JS SDK popup that never leaves the
+    video page; without credentials the old redirect-or-mock flow
+    stays. Jobs without a video keep the classic below-video cards.
+    """
     title = job.get("filename") or "Video"
     status = job.get("status", "")
     if checkout_mode == "sandbox":
@@ -62,40 +190,27 @@ def embed_page(job: dict, brand: str, checkout_mode: str = "demo",
         body = "".join(parts)
         return _wrap(title, brand, body)
 
+    sdk = checkout_mode == "sandbox" and bool(paypal_client_id)
+    products = job.get("products") or []
     if has_video:
         video_url = f"/api/jobs/{html.escape(job.get('id', ''))}/video"
-        parts.append(
+        video_tag = (
             f'<video controls playsinline preload="metadata" '
             f'style="width:100%" src="{video_url}"></video>'
         )
-    products = job.get("products") or []
+        if products:
+            rail = "".join(_card_html(p, sdk, overlay=True) for p in products)
+            parts.append(
+                f'<div class="player-wrap">{video_tag}'
+                f'<div class="overlay-rail">{rail}</div></div>'
+            )
+        else:
+            parts.append(video_tag)
     if not products:
         parts.append("<p>No purchasable products were found in this video.</p>")
-    has_tote = False
-    for product in products:
-        name = html.escape(product.get("name", ""))
-        desc = html.escape(product.get("description", ""))
-        price = html.escape(str(product.get("price", "")))
-        ts = _fmt_ts(float(product.get("timestamp_seconds", 0)))
-        if product.get("name") == "Organic Cotton Tote Bag":
-            has_tote = True
-        buy_arg = json.dumps(
-            {"amount": str(product.get("price", "")), "description": product.get("name", "")}
-        )
-        buy_arg = (
-            buy_arg.replace("<", "\\u003c")
-            .replace(">", "\\u003e")
-            .replace("&", "\\u0026")
-            .replace("'", "\\u0027")
-        )
-        parts.append(
-            f'<div class="card"><h3>{name}</h3>'
-            f"<p>{desc}</p>"
-            f'<p class="price">${price}</p>'
-            f'<p class="ts">Mentioned at {ts} in the video</p>'
-            f"<button onclick='buy(this, {buy_arg})'>Buy with PayPal</button>"
-            f"</div>"
-        )
+    elif not has_video:
+        parts.extend(_card_html(p, sdk, overlay=False) for p in products)
+    has_tote = any(p.get("name") == "Organic Cotton Tote Bag" for p in products)
     if has_tote:
         parts.append(
             '<p class="note">Note: the Organic Cotton Tote Bag\'s $12.00 was '
@@ -158,6 +273,14 @@ async function buy(btn, payload) {
 }
 </script>
 """)
+    if sdk:
+        # The client id is PayPal's public identifier; the Secret never
+        # enters the page — order creation and capture stay server-side.
+        parts.append(
+            _sdk_script().replace(
+                "CLIENT_ID", html.escape(paypal_client_id, quote=True)
+            )
+        )
     body = "".join(parts)
     return _wrap(title, brand, body)
 
