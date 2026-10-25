@@ -38,9 +38,16 @@ button:disabled { opacity: .5; }
    the bottom of the video (above the control bar) so shoppers buy
    while watching. The rail ignores clicks except on the cards
    themselves, sits well above the control bar (~64px of clearance,
-   so no button edge is ever pressed or clipped by the progress bar),
-   and its height is capped so the video body stays visible, and
-   cards are always visible — never gated per second. Overlay
+   so no button edge is ever pressed or clipped by the progress bar).
+   The rail height is deliberately NOT capped (round-4 fix): the old
+   168px cap left a 144px content box while a rendered card needs
+   ~156-171px, and the entire deficit came out of the product name —
+   the only shrinkable element (overflow:hidden gives it an automatic
+   minimum of 0) — so the name vanished the moment the pill rendered.
+   Cards now size to content and grow upward from the 64px clearance,
+   so the control bar is never threatened; stretch is kept on purpose
+   for equal-height cards with pills aligned at the foot. Cards are
+   always visible — never gated per second. Overlay
    cards carry name + price + one PayPal button only; the full
    product info (description, timestamp) lives in the cards below the
    video on this page. The rail is centered (safe center: on narrow
@@ -54,7 +61,7 @@ button:disabled { opacity: .5; }
 .player-wrap video { display: block; width: 100%; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 64px;
          display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
-         padding: .75rem 1rem; max-height: 168px;
+         padding: .75rem 1rem;
          box-sizing: border-box; scroll-snap-type: x mandatory;
          scroll-padding-right: 1rem; pointer-events: none;
          justify-content: safe center; }
@@ -265,7 +272,7 @@ def _sdk_script() -> str:
     as the embed player — a closed popup is a neutral cancel note,
     never a red failure."""
     script = """
-<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD&disable-funding=paylater,card" async></script>
+<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD&disable-funding=paylater,card&locale=en_US" async></script>
 <script>
 (function () {
   function classifyCheckoutError(raw) {

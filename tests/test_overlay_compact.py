@@ -155,9 +155,13 @@ def test_embed_overlay_no_paylater_or_card_buttons():
     assert "借记卡" not in html
 
 
-def test_rail_height_capped_and_scrolls_with_snap():
+def test_rail_scrolls_with_snap_and_clears_controls():
     html = _embed_html()
-    assert "max-height: 168px" in html
+    # No height cap any more (round-4 fix: the old 168px cap left a
+    # 144px content box while a rendered card needs ~156-171px, and
+    # the deficit came entirely out of the product name). Scroll,
+    # snap and control clearance are unchanged.
+    assert "max-height: 168px" not in html
     assert "overflow-x: auto" in html
     assert "scroll-snap-type: x mandatory" in html
     assert "scroll-snap-align: start" in html

@@ -100,13 +100,19 @@ def test_card_has_bottom_padding_and_clips_overflow(css):
 
 
 @pytest.mark.parametrize("css", [embed._CSS, pages._CSS])
-def test_rail_cap_fits_taller_cards(css):
-    # Name (up to two lines) + price + pill + tagline removal still
-    # needs more than the old 132px; the cap is raised so the rail
-    # never squeezes the card and pushes the button out.
+def test_rail_cap_removed_name_no_longer_clipped(css):
+    # Round-4 correction of this test's old claim: the 168px cap did
+    # NOT fit taller cards — it left a 144px content box while a
+    # rendered card needs ~156-171px, and the whole deficit came out
+    # of the product name (the only shrinkable element: overflow
+    # hidden gives it an automatic minimum of 0), so the name vanished
+    # the moment the pill rendered. The rail must therefore carry no
+    # max-height at all: it sizes to content, and the cards grow
+    # upward from the 64px control clearance.
     rail = _rule(css, ".overlay-rail")
-    assert "max-height: 168px" in rail
+    assert "max-height" not in rail
     assert "max-height: 132px" not in rail
+    assert "bottom: 64px" in rail
 
 
 # -- 2. product name hierarchy -------------------------------------------

@@ -57,9 +57,20 @@ button:disabled { opacity: .5; }
    the video. The rail itself ignores clicks (video controls stay
    usable) and only the cards respond. It sits well above the control
    bar (~64px of clearance) so no button edge is ever pressed or
-   clipped by the progress bar, and its height is capped so the video
-   body stays visible: overlay cards carry name + price + one PayPal
-   button only — no long description, no timestamp line. Cards are
+   clipped by the progress bar. The rail height is deliberately NOT
+   capped (round-4 fix): the old 168px cap left a 144px content box
+   while a rendered card needs ~156-171px (2-line name + price +
+   40-55px pill + padding), and the entire deficit came out of the
+   product name — the only shrinkable element (overflow:hidden gives
+   it an automatic minimum of 0; the price keeps its 1-line minimum
+   and the pill its fixed iframe height) — so the name vanished the
+   moment the pill rendered. Cards now size to content (bounded by
+   construction: 2-line name clamp, 1-line price, pill at most 55px)
+   and grow upward from the 64px clearance, so the control bar is
+   never threatened. Stretch is kept on purpose: equal-height cards
+   with pills aligned at the foot; stretch was never the clipper.
+   Overlay cards carry name + price + one PayPal button only — no
+   long description, no timestamp line. Cards are
    always visible — never gated per second, because transcription
    timestamps are too coarse to trigger on. The rail is centered
    (safe center: on narrow screens it falls back to start alignment
@@ -73,7 +84,7 @@ button:disabled { opacity: .5; }
 .player-wrap video { display: block; width: 100%; }
 .overlay-rail { position: absolute; left: 0; right: 0; bottom: 64px;
          display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden;
-         padding: .75rem 1rem; max-height: 168px;
+         padding: .75rem 1rem;
          box-sizing: border-box; scroll-snap-type: x mandatory;
          scroll-padding-right: 1rem; pointer-events: none;
          justify-content: safe center; }
@@ -204,7 +215,7 @@ def _sdk_script() -> str:
     unit tests cover — rendered into this script verbatim.
     """
     script = """
-<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD&disable-funding=paylater,card" async></script>
+<script src="https://www.paypal.com/sdk/js?client-id=CLIENT_ID&currency=USD&disable-funding=paylater,card&locale=en_US" async></script>
 <script>
 (function () {
   function classifyCheckoutError(raw) {
