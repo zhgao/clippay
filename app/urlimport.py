@@ -221,6 +221,16 @@ class YtDlpDownloader:
                     "--audio-quality",
                     "0",
                     "--no-playlist",
+                    # 2026-11-07: YouTube blocks the Fly datacenter IP
+                    # on the default web player client. android/mweb
+                    # clients are less often blocked; --js-runtimes deno
+                    # lets yt-dlp solve JS challenges with the Deno
+                    # runtime installed in the Dockerfile. No cookies,
+                    # no paid proxy — both stay out per the $0 line.
+                    "--extractor-args",
+                    "youtube:player_client=android,mweb",
+                    "--js-runtimes",
+                    "deno",
                     "-o",
                     template,
                     url,

@@ -4,7 +4,14 @@ WORKDIR /app
 
 # ffmpeg is needed by yt-dlp for audio extraction (link import) and by
 # the demo-video generation script; faster-whisper decodes via PyAV.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# curl + unzip install Deno, the JS runtime yt-dlp uses to solve
+# YouTube's JS verification challenges. 2026-11-07: from-url was blocked
+# by YouTube on the Fly datacenter IP; Deno + the android/mweb player
+# client is the $0 bypass attempt (no cookies, no paid proxy).
+# DENO_INSTALL=/usr/local puts `deno` on PATH for yt-dlp to find.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg curl unzip ca-certificates \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

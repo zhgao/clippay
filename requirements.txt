@@ -12,4 +12,7 @@ pytest==9.1.1
 # Both are optional at runtime — the endpoints return clear errors when
 # a helper is missing — but they belong in the deployed environment.
 youtube-transcript-api
-yt-dlp
+# Pinned 2026-11-07: from-url was blocked by YouTube on the Fly IP;
+# 2026.10.26 is the newest release and the Deno + android/mweb bypass
+# needs a recent yt-dlp. Unpin only with a re-test of from-url.
+yt-dlp==2026.10.26

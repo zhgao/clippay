@@ -413,3 +413,36 @@ def test_landing_and_watch_pages_expose_new_entry_points(client_factory):
     assert watch.status_code == 200
     assert "Try the sample instantly" in watch.text
     assert "/api/videos/sample" in watch.text
+
+
+def test_ytdlp_downloader_uses_android_mweb_and_deno(tmp_path, monkeypatch):
+    """Regression test (2026-11-07): YouTube blocks the Fly datacenter
+    IP on the default web player client. The downloader must ask for the
+    android/mweb player clients and let yt-dlp use the Deno JS runtime
+    installed in the Dockerfile — no cookies, no paid proxy."""
+    import subprocess
+
+    from app.urlimport import YtDlpDownloader
+
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # download_audio globs for the produced wav; pre-place one so the
+    # fake run can "succeed" without touching the network or yt-dlp.
+    (tmp_path / "abc123.wav").write_bytes(b"RIFFxxxxWAVE")
+    path = YtDlpDownloader().download_audio(
+        "https://www.youtube.com/watch?v=abc123", str(tmp_path)
+    )
+    assert path.endswith(".wav")
+    argv = captured["argv"]
+    assert argv[0] == "yt-dlp"
+    assert "--extractor-args" in argv
+    assert argv[argv.index("--extractor-args") + 1] == (
+        "youtube:player_client=android,mweb"
+    )
+    assert "--js-runtimes" in argv
+    assert argv[argv.index("--js-runtimes") + 1] == "deno"
